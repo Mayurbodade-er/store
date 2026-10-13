@@ -19,16 +19,115 @@ In tier-2/3 retail environments (Clothes, Footwear, Kirana), over 70% of stores 
 
 ---
 
-## 2. Business Rules & Actors
+## 2. Standardized Files & Folder Mapping
 
-### 2.1 Actors & Roles
+Following our token-efficient Vertical Slice Architecture (VSA), `VS-01` is strictly isolated within `src/features/rbac_security/`. All files, responsibilities, and visibility boundaries are mapped below:
+
+```
+src/features/rbac_security/
+├── SLICE.md                             # Token-efficient AI manifest (< 250 tokens)
+├── mod.rs                               # Public gateway (re-exports only external items)
+│
+├── internal/                            # Private domain layer (pub(crate) only)
+│   ├── logic.rs                         # Argon2id hashing, zeroize scrubbing, lockout FSM
+│   ├── models.rs                        # SQLite entities (User, Role, SecuritySettings, AuditLog)
+│   └── repo.rs                          # Direct SQLite migrations & queries for security tables
+│
+├── external/                            # Public consumption layer (Dioxus 0.7 components)
+│   ├── style.css                        # Scoped SoftMorph CSS for keypad, badges, and modals
+│   ├── views.rs                         # Route views (LockScreenView, AccessDeniedView, SecuritySettingsView)
+│   ├── hooks/                           # Reactive state hooks
+│   │   ├── use_rbac_auth.rs             # Session signal, role state, and permission evaluator
+│   │   └── use_pin_challenge.rs         # Modal state, attempt counter, and tactile shake trigger
+│   └── components/                      # Reusable visual RSX components
+│       ├── master_pin_modal.rs          # SoftMorph tactile keypad modal (F2 shortcut / touch)
+│       ├── solo_mode_badge.rs           # Header / sidebar glowing solo status badge
+│       ├── solo_mode_toggle.rs          # Settings tactile toggle switch with PIN auth gate
+│       └── desktop_sidebar.rs           # 240px role-filtered collapsible navigation sidebar
+│
+└── test/                                # Continuous In-Slice Verification Gate
+    ├── fr/                              # Functional Requirements
+    │   ├── unit_pin_hashing.rs          # Argon2id verify, salt validation, zeroize drop check
+    │   ├── unit_solo_mode_rules.rs      # Rule engine: Solo ON bypass vs Solo OFF supervisor gate
+    │   ├── integ_repo_security.rs       # In-memory SQLite roundtrip, 5-attempt lockout increment
+    │   ├── rbac_role_gate.rs            # Route guard tests (Cashier blocked from Owner routes)
+    │   └── e2e_modal_interaction.rs     # Dioxus headless VDOM: keypad touch/click submission
+    └── nfr/                             # Non-Functional Requirements
+        ├── perf_pin_benchmark.rs        # Criterion benchmark: Argon2id <= 45ms, permission check <= 0.1ms
+        └── sec_fuzz_pin.rs              # Proptest: SQL injection fuzzing, memory leak audit
+```
+
+---
+
+## 3. Dioxus Route Definitions & Navigation Map
+
+This slice defines, handles, and guards routes across the application using Dioxus 0.7's type-safe `#[derive(Routable)]` enum.
+
+### 3.1 Route Registry & Access Matrix
+| Route Path | Route Enum Variant | View Component | Access Control / Guard | Purpose |
+| :--- | :--- | :--- | :--- | :--- |
+| `/lock` | `Route::LockScreen` | `LockScreenView` | Public (Unauthenticated) | Idle lock screen (15 min inactivity or 1-tap lock). Requires Cashier PIN or Master PIN to unlock. |
+| `/access-denied` | `Route::AccessDenied` | `AccessDeniedView` | Authenticated | Rendered when a Cashier attempts to access an Owner-only route. Offers "Authorize with Master PIN" button. |
+| `/settings/security`| `Route::SecuritySettings`| `SecuritySettingsView` | `StoreOwner` or `Solo Mode` | Master PIN reset, Solo Mode toggle, lockout duration, and 12-word recovery seed display. |
+| `/recovery` | `Route::EmergencyRecovery`| `EmergencyRecoveryView`| Public | Offline 12-word mnemonic seed entry to reset a forgotten Master PIN. |
+
+### 3.2 Dioxus Route Code Definition
+```rust
+// In src/features/rbac_security/external/views.rs
+use dioxus::prelude::*;
+
+#[derive(Routable, Clone, Debug, PartialEq)]
+pub enum SecurityRoute {
+    #[route("/lock")]
+    LockScreen {},
+
+    #[route("/access-denied")]
+    AccessDenied {
+        attempted_path: String,
+        required_role: String,
+    },
+
+    #[route("/settings/security")]
+    SecuritySettings {},
+
+    #[route("/recovery")]
+    EmergencyRecovery {},
+}
+```
+
+### 3.3 Navigation Guards & Middleware Hook
+Every protected route in the global Dioxus router uses the `use_rbac_guard` hook from this slice:
+```rust
+// Guard evaluated at top of protected views
+pub fn use_rbac_guard(required_permission: SecurityPermission) -> bool {
+    let auth = use_rbac_auth();
+    if auth.is_solo_mode() {
+        return true; // Solo Mode bypass: instant access
+    }
+    if !auth.has_permission(required_permission) {
+        let nav = navigator();
+        nav.replace(SecurityRoute::AccessDenied {
+            attempted_path: nav.current_location().path().to_string(),
+            required_role: "StoreOwner".to_string(),
+        });
+        return false;
+    }
+    true
+}
+```
+
+---
+
+## 4. Business Rules & Actors
+
+### 4.1 Actors & Roles
 | Actor / Role | Description | Privilege Scope |
 | :--- | :--- | :--- |
 | **StoreOwner (Manager)** | Primary owner/proprietor who holds the Master PIN. | Full access to all modules, financial margins, tax settings, staff management, DB backup, and audit logs. |
 | **Cashier (Clerk)** | Counter assistant or family helper during peak footfall. | POS barcode scanning, cart management, accepting standard cash/UPI payments, receipt printing. |
 | **Solo Operator** | StoreOwner operating with Solo Mode enabled. | All privileges unlocked seamlessly without any supervisor confirmation prompts. |
 
-### 2.2 Core Business Rules
+### 4.2 Core Business Rules
 - **BR-SEC-01 (Master PIN Security)**: A 4-to-6 digit numeric PIN is set during initial onboarding. It is stored as an Argon2id salted hash with memory cost 19 MiB, time cost 2 iterations, and zeroized in-memory buffers.
 - **BR-SEC-02 (Solo Mode Frictionless Operation)**: When Solo Mode is enabled, any system action flagged with `RequiresSupervisorApproval` automatically evaluates to `Permitted` without showing a PIN modal.
 - **BR-SEC-03 (Anti-Brute-Force Lockout)**: If an invalid PIN is entered 5 consecutive times, the PIN modal locks out for 3 minutes with an exponential backoff (+3 minutes per subsequent failure).
@@ -37,9 +136,9 @@ In tier-2/3 retail environments (Clothes, Footwear, Kirana), over 70% of stores 
 
 ---
 
-## 3. Functional Requirements (FR)
+## 5. Functional Requirements (FR)
 
-### 3.1 User Stories & Acceptance Criteria
+### 5.1 User Stories & Acceptance Criteria
 
 #### US-FR-01: Solo Mode Instant Toggle
 > *As a single store proprietor, I want to toggle Solo Mode on with one tap so that I can bill customers and adjust prices rapidly without entering my PIN on every discount.*
@@ -66,7 +165,7 @@ In tier-2/3 retail environments (Clothes, Footwear, Kirana), over 70% of stores 
   - [x] When logged in as `Cashier`, navigation sidebar/tabs automatically hide `Pocket BI Analytics`, `Store Settings`, `Staff Management`, and `Khata Customer Limits`.
   - [x] Direct route tampering or URL navigation to restricted paths renders an `AccessDeniedCard` prompting for Master PIN override.
 
-### 3.2 Edge Cases & Failure Scenarios
+### 5.2 Edge Cases & Failure Scenarios
 1. **EC-FR-01 (Sudden Power Cut / Tab Close during PIN Challenge)**:
    - State must not lock the database in an uncommitted transaction. The pending checkout remains in draft/parked status; the action is rejected upon reload until re-authorized.
 2. **EC-FR-02 (Simultaneous Cashier Shift Handover)**:
@@ -76,9 +175,9 @@ In tier-2/3 retail environments (Clothes, Footwear, Kirana), over 70% of stores 
 
 ---
 
-## 4. Non-Functional Requirements (NFR)
+## 6. Non-Functional Requirements (NFR)
 
-### 4.1 System Stories & System Acceptance Criteria
+### 6.1 System Stories & System Acceptance Criteria
 
 #### US-NFR-01: High-Speed Verification Latency (NFR-PERF-01)
 > *As a local-first application, the PIN verification and role evaluation must execute locally in < 50ms so that queue checkout throughput is never slowed down.*
@@ -94,7 +193,7 @@ In tier-2/3 retail environments (Clothes, Footwear, Kirana), over 70% of stores 
   - [x] Master PIN structs implement the `zeroize::Zeroize` and `zeroize::ZeroizeOnDrop` traits.
   - [x] No string formatting (`"{:?}"`, `"{}"`) is implemented for PIN types (`Debug` outputs `"[REDACTED]"`).
 
-### 4.2 NFR Edge Cases
+### 6.2 NFR Edge Cases
 1. **EC-NFR-01 (High-Frequency Fuzzing Attack)**:
    - Brute-force attacks submitting > 10 PIN attempts per second trigger the SQLite lock gate, halting verification threads for 3 minutes and logging an anomaly security event.
 2. **EC-NFR-02 (Corrupted Salt in SQLite)**:
@@ -102,7 +201,7 @@ In tier-2/3 retail environments (Clothes, Footwear, Kirana), over 70% of stores 
 
 ---
 
-## 5. Database Schema (SQLite / SQLCipher)
+## 7. Database Schema (SQLite / SQLCipher)
 
 This slice owns the security and session metadata tables. Migrations are executed within `internal/repo.rs`.
 
@@ -157,11 +256,11 @@ CREATE INDEX IF NOT EXISTS idx_rbac_audit_created ON rbac_audit_logs(created_at 
 
 ---
 
-## 6. Internal Logic & API Contracts (Rust Traits & DTOs)
+## 8. Internal Logic & API Contracts (Rust Traits & DTOs)
 
 Because RetailOS uses Dioxus with in-process Rust architecture, "API contracts" are modeled as strongly-typed, thread-safe asynchronous Rust service traits rather than external HTTP endpoints.
 
-### 6.1 Data Transfer Objects & Error Types
+### 8.1 Data Transfer Objects & Error Types
 ```rust
 // In src/features/rbac_security/internal/models.rs
 use serde::{Deserialize, Serialize};
@@ -197,7 +296,7 @@ pub enum SecurityError {
 }
 ```
 
-### 6.2 Service Contract (Public Trait)
+### 8.2 Service Contract (Public Trait)
 ```rust
 // In src/features/rbac_security/internal/logic.rs
 use crate::features::rbac_security::internal::models::*;
@@ -219,11 +318,11 @@ pub trait SecurityService: Send + Sync {
 
 ---
 
-## 7. UI / UX Specification (SoftMorph Design System)
+## 9. UI / UX Specification (SoftMorph Design System)
 
 All visual elements conform to `docs/ui-ux-design-system.md` using the **Terracotta & Apricot SoftMorph** neomorphic palette.
 
-### 7.1 Visual Color Tokens Used in this Slice
+### 9.1 Visual Color Tokens Used in this Slice
 - **Base Surface**: Oatmeal Clay (`#EFE9E0`)
 - **Primary Accent / Active Key**: Terracotta (`#E06D3B`)
 - **Keypad Tactile Bump**: Apricot Cream (`#F6E2D5`)
@@ -234,7 +333,7 @@ All visual elements conform to `docs/ui-ux-design-system.md` using the **Terraco
 
 ---
 
-### 7.2 Responsive Screen Layouts & Wireframes
+### 9.2 Responsive Screen Layouts & Wireframes
 
 ```
 +----------------------------------------------------------------------------------------------------+
@@ -279,7 +378,7 @@ All visual elements conform to `docs/ui-ux-design-system.md` using the **Terraco
 +----------------------------------------------------------------------------------------------------+
 ```
 
-### 7.3 Desktop Sidebar Navigation Specification
+### 9.3 Desktop Sidebar Navigation Specification
 - **Fixed Width**: `240px` collapsible to `72px` icon-rail.
 - **Top Brand**: Soft embossed RetailOS logo with warm Terracotta accent.
 - **Role-Aware Filtering**:
@@ -289,11 +388,11 @@ All visual elements conform to `docs/ui-ux-design-system.md` using the **Terraco
 
 ---
 
-## 8. In-Slice Tests Specification (FR & NFR)
+## 10. In-Slice Tests Specification (FR & NFR)
 
 Following our strict architecture, tests are contained inside `src/features/rbac_security/test/`.
 
-### 8.1 Functional Tests (`test/fr/`)
+### 10.1 Functional Tests (`test/fr/`)
 1. **`unit_pin_hashing.rs`**:
    - Tests Argon2id hash generation and verification.
    - Tests rejection of incorrect PINs and whitespace-padded inputs.
@@ -309,7 +408,7 @@ Following our strict architecture, tests are contained inside `src/features/rbac
 5. **`e2e_modal_interaction.rs`**:
    - Headless Dioxus Virtual DOM test simulating touch clicks on numeric keypad buttons `1-2-3-4` and submitting the form.
 
-### 8.2 Non-Functional Tests (`test/nfr/`)
+### 10.2 Non-Functional Tests (`test/nfr/`)
 1. **`perf_pin_benchmark.rs` (Criterion)**:
    - Measures Argon2id verification latency: must be $\le 50\text{ms}$ (target $25\text{ms} - 45\text{ms}$).
    - Measures in-memory permission check: must be $\le 0.1\text{ms}$ ($< 100\mu\text{s}$).
@@ -320,7 +419,7 @@ Following our strict architecture, tests are contained inside `src/features/rbac
 
 ---
 
-## 9. Definition of Done (DoD) Checklist for VS-01
+## 11. Definition of Done (DoD) Checklist for VS-01
 
 - [ ] `SLICE.md` manifest written (< 250 tokens).
 - [ ] Argon2id hashing & `zeroize` memory scrubbing implemented in `internal/logic.rs`.
