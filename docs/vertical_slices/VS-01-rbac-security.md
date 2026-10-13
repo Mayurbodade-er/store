@@ -193,11 +193,26 @@ pub fn use_rbac_guard(required_permission: SecurityPermission) -> bool {
   - [x] Master PIN structs implement the `zeroize::Zeroize` and `zeroize::ZeroizeOnDrop` traits.
   - [x] No string formatting (`"{:?}"`, `"{}"`) is implemented for PIN types (`Debug` outputs `"[REDACTED]"`).
 
-### 6.2 NFR Edge Cases
+#### US-NFR-03: Database Transaction Integrity & Query Budget (NFR-DB-01)
+> *As an embedded local-first database, RBAC database reads and audit log writes must complete without locking POS checkouts or degrading SQLite throughput.*
+
+- **System Acceptance Criteria**:
+  - [x] **Query Latency Budget**: Cached settings read $\le 0.5\text{ms}$; `rbac_audit_logs` insert $\le 3.0\text{ms}$ under WAL mode (`PRAGMA journal_mode = WAL`).
+  - [x] **Index Coverage**: All queries on `rbac_users(role_id)` and `rbac_audit_logs(created_at DESC)` use B-tree index coverage; 0 unindexed table scans (`EXPLAIN QUERY PLAN` verified).
+  - [x] **ACID Lock Isolation**: Security settings updates execute inside an immediate transaction (`BEGIN IMMEDIATE`) with a 5000ms busy timeout (`PRAGMA busy_timeout = 5000`) to prevent `SQLITE_BUSY` crashes during concurrent background sync.
+  - [x] **Zero Plaintext at Rest**: SQLite columns store only salted Argon2id hashes and base64 salts; zero plaintext PINs or seeds in any column or WAL page.
+
+### 6.2 System & Database Edge Cases
 1. **EC-NFR-01 (High-Frequency Fuzzing Attack)**:
    - Brute-force attacks submitting > 10 PIN attempts per second trigger the SQLite lock gate, halting verification threads for 3 minutes and logging an anomaly security event.
 2. **EC-NFR-02 (Corrupted Salt in SQLite)**:
    - If SQLite storage experiences bit rot in the `argon2_hash` column, the app fails gracefully into Emergency Recovery Seed Mode rather than panicking or crashing the process.
+3. **EC-DB-01 (Abrupt Crash / Power Cut Mid-PIN Update)**:
+   - If power is pulled while rewriting `rbac_security_settings.pin_hash`, SQLite WAL atomic rollback restores the previous valid hash upon restart without corrupting database headers.
+4. **EC-DB-02 (Database Lock Contention under Concurrent Background Sync)**:
+   - If `offline_sync_engine` holds a write transaction while a Cashier triggers a Master PIN override, the query employs a 5-second exponential retry loop instead of throwing an unhandled `SQLITE_LOCKED` error.
+5. **EC-DB-03 (Audit Log Storage Exhaustion on Constrained POS Disks)**:
+   - In 8GB eMMC POS terminals, `rbac_audit_logs` table automatically runs a 90-day pruning maintenance query on app startup to prevent unbounded storage bloat.
 
 ---
 
@@ -403,19 +418,27 @@ Following our strict architecture, tests are contained inside `src/features/rbac
 3. **`integ_repo_security.rs`**:
    - Runs round-trip SQLite tests using in-memory SQLite connection.
    - Tests lockout timer increment upon 5 consecutive failed attempts.
-4. **`rbac_role_gate.rs`**:
+   - Verifies atomic rollback on aborted transaction (`BEGIN ... ROLLBACK`).
+4. **`integ_db_concurrency.rs` (Database ACID Test)**:
+   - Simulates concurrent write locks during mock delta sync and tests automatic 5-second `busy_timeout` resolution without data loss.
+5. **`rbac_role_gate.rs`**:
    - Tests cashier session rejection on owner-only routes.
-5. **`e2e_modal_interaction.rs`**:
+6. **`e2e_modal_interaction.rs`**:
    - Headless Dioxus Virtual DOM test simulating touch clicks on numeric keypad buttons `1-2-3-4` and submitting the form.
 
 ### 10.2 Non-Functional Tests (`test/nfr/`)
 1. **`perf_pin_benchmark.rs` (Criterion)**:
    - Measures Argon2id verification latency: must be $\le 50\text{ms}$ (target $25\text{ms} - 45\text{ms}$).
    - Measures in-memory permission check: must be $\le 0.1\text{ms}$ ($< 100\mu\text{s}$).
-2. **`sec_fuzz_pin.rs` (Proptest & Security)**:
+2. **`perf_db_queries.rs` (Database Query Latency)**:
+   - Benchmarks cached settings query: must be $\le 0.5\text{ms}$.
+   - Benchmarks 10,000 inserted audit logs: verifies `EXPLAIN QUERY PLAN` utilizes `idx_rbac_audit_created` B-tree with 0 table scans.
+3. **`sec_fuzz_pin.rs` (Proptest & Security)**:
    - Fuzzes PIN inputs with random Unicode, ASCII control codes, SQL injection strings (`' OR '1'='1`), and buffer overflows.
    - Verifies zero memory leaks and zero panics.
    - Asserts that audit logs record the event without logging the raw input characters.
+4. **`sec_db_leakage.rs` (Zero Plaintext Audit)**:
+   - Queries raw SQLite byte buffer after commit to verify that no plaintext PIN digits or seeds exist in plaintext within the `.db` file or WAL journal.
 
 ---
 
