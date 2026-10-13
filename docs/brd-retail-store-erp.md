@@ -125,6 +125,7 @@ Allow any small retailer to set up their specific business in minutes without ve
 | **BR-INV-07** | **Label & Barcode Generator** | Print from PC or mobile. | Generates custom 1D/2D barcodes on thermal sticker rolls (50x25mm, 38x25mm) for unbranded clothes, shoe boxes, and repacked grains. | `FR-SET-06`<br>`FR-INV-04` |
 | **BR-INV-08** | **Batch, Lot & Expiry Tracking** | Crucial for Kirana. | Supports FIFO/FEFO tracking. Highlights items reaching expiry within 15/30/60 days on the dashboard. | `FR-INV-03`<br>`FR-BI-04` |
 | **BR-INV-09** | **Mobile Camera Shelf Stocktake** | Solo operator audit. | Staff walks aisles scanning barcodes via phone camera; real-time comparison against local ledger highlights shrinkage/discrepancies. | `FR-INV-06` |
+| **BR-INV-10** | **Base Currency & Localization Config** | Configured at onboarding / settings. | Supports international currencies (`INR`, `USD`, `EUR`, `GBP`, `AED`, `SAR`, `JPY`). Configurable symbol position (prefix/suffix), decimal places (0, 2, 3), and numeral grouping (Indian Lakhs vs. International Thousands). All accounting enforced via fixed-point 128-bit decimal. | `FR-SET-07` |
 
 ---
 
@@ -239,6 +240,7 @@ The matrix below provides bidirectional traceability between the **RFP Specifica
 | **FR-EMP-04** | **BR-EMP-04** | Shift Cash Drawer & Blind Count | As an owner, I want my cashier to count cash blind at day end so they cannot steal drawer discrepancies. | **AC-23.1:** Cashier inputs physical cash count without seeing system total; system flags difference to owner. |
 | **FR-EMP-05** | **BR-EMP-05** | Staff Attendance & Wage Advances | As an owner, I want to log helper daily attendance and small salary advances from the register. | **AC-24.1:** 1-tap in/out attendance marking; cash advances automatically deduct from month-end wage slip. |
 | **FR-EMP-06** | **BR-EMP-06** | Salesperson Commission Tracking | As a shoe boutique owner, I want to track which salesperson sold which pair of shoes to calculate their monthly bonus. | **AC-25.1:** Cashier selects salesperson on cart line; monthly report aggregates individual sales volume and commission. |
+| **FR-SET-07** | **BR-INV-10** | Base Currency & Number Localization | As an international store owner, I want to choose my currency (INR, USD, EUR, etc.), decimal places, and numeral formatting so bills reflect my local market. | **AC-27.1:** Selection of currency updates symbols and decimal precision (0, 2, or 3) across all carts and reports.<br>**AC-27.2:** Fixed-point 128-bit decimal calculation prevents fractional rounding drift. |
 | **NFR-UX-04** | **BR-POS-08** | Quick Emergency Register Lock | As a solo shopkeeper, I want to lock my register in 1 tap when I step out for 5 minutes so no customer or visitor can touch it. | **AC-26.1:** 1-tap lock blanks screen and secures drawer; unlocks instantly with 4-digit PIN. |
 
 ---

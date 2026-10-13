@@ -59,14 +59,26 @@ flowchart TD
     ModeD --> AttrD["Enables custom attributes & mixed units for variety / multi-category stores"]
 ```
 
-### 2.1 Dynamic Attribute Engine
+### 2.1 Multi-Currency & International Localization Engine
+To support retail store deployment globally without regional hardcoding:
+- **Configurable Base Store Currency:** During onboarding or via Store Settings, the retailer selects their operating currency (e.g., `INR (₹)`, `USD ($)`, `EUR (€)`, `GBP (£)`, `AED (د.إ)`, `SAR (﷼)`, `JPY (¥)`, `CAD ($)`, `AUD ($)`).
+- **Customizable Symbol Placement & Decimal Precision:**
+  - Prefix vs. Suffix symbol placement (e.g., `$100.00` vs. `100.00 €` vs. `100 د.إ`).
+  - Strict decimal precision configuration: `0` decimals (JPY, KRW, VND), standard `2` decimals (INR, USD, EUR), or `3` decimals (KWD, OMR, BHD, TND).
+- **Locale-Aware Number & Digit Formatting:**
+  - Indian Numbering System (`1,00,000.00` Lakhs/Crores) when INR is selected.
+  - International Standard Grouping (`100,000.00` Thousands/Millions) for global currencies.
+- **Fixed-Point High Precision Math:** All monetary operations must utilize 128-bit fixed-point decimal mathematics (e.g., `rust_decimal::Decimal`), strictly forbidding IEEE-754 floating-point (`f64`) accumulation to prevent fractional currency drift during discount, tax, and tender rounding.
+
+
+### 2.2 Dynamic Attribute Engine
 The inventory schema must be dynamic rather than hardcoded:
 - **Clothing / Apparel Profile:** Automatically enables matrix variants (e.g., Parent: "Cotton Shirt", Children: "Size 40 - Blue", "Size 42 - White"), seasonal tags, and alteration notes.
 - **Footwear Profile:** Automatically enables shoe size standards (UK, US, EU), box barcode scanning, and pair exchange checks.
 - **Kirana / Grocery Profile:** Automatically enables dual-unit conversions (Bulk 50kg bag $\rightarrow$ loose 500g/1kg/custom billing), electronic weighing scale integration, and FMCG batch/expiry alerts.
 - **Custom / Mixed Profile:** Allows the owner to toggle on/off any attribute (e.g., a general store selling both snacks and slippers can use both loose weight and shoe size attributes without software reinstallation).
 
-### 2.2 Instant Inventory Intake (Zero Friction for Solo Operators)
+### 2.3 Instant Inventory Intake (Zero Friction for Solo Operators)
 - **Quick-Add During Billing:** If a customer brings an unlisted item to the counter, the single operator can add the item, price, and stock in **3 taps** directly from the billing screen without navigating to a separate back-office catalog.
 - **Pre-Loaded Master Catalogs:** Out-of-the-box pre-loaded database containing thousands of popular FMCG grocery items with pre-filled barcodes, names, and tax codes, plus standard shoe/apparel size charts.
 - **Mobile Camera Intake:** Solo shopkeepers can use their mobile camera to scan a vendor box, enter purchase cost and quantity, and immediately print or generate shelf barcodes.

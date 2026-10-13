@@ -189,10 +189,10 @@ src/features/<slice_name>/
 - **Test Gate**: Unit PIN hashing, SQL injection fuzz, Solo Mode toggle benchmark (< 0.1ms).
 
 #### [VS-02] `store_onboarding`
-- **Purpose**: First-run wizard setting store category (`Clothes`, `Footwear`, `Kirana`, `Custom`) and tax structure.
+- **Purpose**: First-run wizard setting store category (`Clothes`, `Footwear`, `Kirana`, `Custom`), base currency (`INR`, `USD`, `EUR`, `GBP`, `AED`, `SAR`, `JPY`), decimal precision (0, 2, 3), numeral grouping (Lakhs vs Millions), and tax structure.
 - **Upstream Dependencies**: `VS-01`, `packages/core-database`, `packages/core-ui`.
-- **Downstream Consumers**: `VS-03`, `VS-04`.
-- **Exported Types / Signals**: `StoreProfile`, `StoreCategory`, `use_store_profile()`.
+- **Downstream Consumers**: `VS-03`, `VS-04`, `VS-06`.
+- **Exported Types / Signals**: `StoreProfile`, `StoreCategory`, `CurrencyConfig`, `use_store_profile()`.
 
 #### [VS-03] `inventory_catalog`
 - **Purpose**: Base catalog management, category tree, barcode indexing, and tax brackets.
